@@ -17,7 +17,7 @@ public sealed class DealerRepository : IDealerRepository
     public async Task<Dealer?> GetByEmailAsync(string email, CancellationToken cancellationToken = default)
     {
         const string sql = @"
-            SELECT Id, Email, Password
+            SELECT Id, Email, Password AS PasswordHash
             FROM Dealers
             WHERE Email = @Email COLLATE NOCASE
             LIMIT 1;";

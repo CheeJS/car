@@ -125,6 +125,9 @@ Strict layered separation: controllers never talk to repositories directly, repo
 | Unhandled errors | `GlobalExceptionMiddleware` logs the full exception server-side with a correlation ID; the client receives only `{ "error": "An unexpected error occurred.", "correlationId": "…" }`. No stack traces, no exception types in responses. |
 | Login enumeration | Wrong password and unknown email return the same 401 message. |
 | Brute force | `/api/auth/register` and `/api/auth/login` are behind a fixed-window rate limiter (30 requests / minute / IP). 31st request returns 429. |
+| User enumeration via timing | Login runs `BCrypt.Verify` against a placeholder hash even when the email is unknown, so the wrong-password path and the no-such-account path take the same time. Without this, ~250 ms of BCrypt work would reveal which emails are registered. |
+| Hash-name confusion | The `Dealer.PasswordHash` property name makes it explicit that the stored value is a BCrypt hash, not a plaintext password. SQL column remains `Password` for schema simplicity; mapped via `SELECT Password AS PasswordHash`. |
+| Dependency vulnerabilities | `dotnet list package --vulnerable --include-transitive` is clean for both the API and the test project. The known-vulnerable `System.Net.Http 4.3.0` and `System.Text.RegularExpressions 4.3.0` that ship transitively with older `Microsoft.NET.Test.Sdk` are overridden with patched 4.3.4 / 4.3.1 references. |
 | Stock race conditions | `PATCH /api/cars/{id}/stock/adjust` performs `UPDATE … SET Stock = Stock + @Delta WHERE … AND Stock + @Delta >= 0` in a single SQL statement. Concurrent decrements compose correctly — proven by an integration test that fires 20 parallel `-1` adjustments against a stock of 10 and asserts exactly 10 succeed, 10 are rejected, and the final stock is 0. |
 
 ### Error response shape

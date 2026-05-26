@@ -114,7 +114,7 @@ public sealed class AuthServiceTests
         var stored = await dealers.GetByEmailAsync("dealer@example.com");
 
         Assert.NotNull(stored);
-        Assert.NotEqual("SecurePass1!", stored!.Password);
-        Assert.StartsWith("$2", stored.Password);
+        Assert.NotEqual("SecurePass1!", stored!.PasswordHash);
+        Assert.StartsWith("$2", stored.PasswordHash);
     }
 }

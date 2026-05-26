@@ -20,6 +20,12 @@ public sealed class AuthService : IAuthService
 {
     private const int BCryptWorkFactor = 12;
 
+    // Computed once on first failed login with an unknown email. Used so that the
+    // not-found path runs a BCrypt.Verify identical in cost to the wrong-password
+    // path — without this, an attacker could enumerate registered emails by timing.
+    private static readonly Lazy<string> DummyHash =
+        new(() => BCrypt.Net.BCrypt.HashPassword("timing-equalizer", BCryptWorkFactor));
+
     private readonly IDealerRepository _dealers;
     private readonly JwtOptions _jwt;
 
@@ -48,9 +54,16 @@ public sealed class AuthService : IAuthService
         string email, string password, CancellationToken cancellationToken = default)
     {
         var dealer = await _dealers.GetByEmailAsync(email.Trim(), cancellationToken);
-        if (dealer is null) return null;
 
-        if (!BCrypt.Net.BCrypt.Verify(password, dealer.Password)) return null;
+        if (dealer is null)
+        {
+            // Equalize timing with the wrong-password branch so an attacker cannot
+            // distinguish "no such dealer" from "wrong password" by response latency.
+            _ = BCrypt.Net.BCrypt.Verify(password, DummyHash.Value);
+            return null;
+        }
+
+        if (!BCrypt.Net.BCrypt.Verify(password, dealer.PasswordHash)) return null;
 
         return IssueToken(dealer.Id, dealer.Email);
     }
