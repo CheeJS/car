@@ -1,6 +1,7 @@
 using OracleCMS.CarStock.API.Entities;
 using OracleCMS.CarStock.API.Repositories.Interfaces;
 using OracleCMS.CarStock.API.Services.Interfaces;
+using RepoOutcome = OracleCMS.CarStock.API.Repositories.Interfaces.AdjustStockOutcome;
 
 namespace OracleCMS.CarStock.API.Services;
 
@@ -50,5 +51,21 @@ public sealed class CarService : ICarService
         var updated = await _cars.UpdateStockAsync(dealerId, id, stock, cancellationToken);
         if (!updated) return null;
         return await _cars.GetByIdAsync(dealerId, id, cancellationToken);
+    }
+
+    public async Task<AdjustStockResult> AdjustStockAsync(
+        int dealerId, int id, int delta, CancellationToken cancellationToken = default)
+    {
+        var outcome = await _cars.AdjustStockAsync(dealerId, id, delta, cancellationToken);
+
+        return outcome switch
+        {
+            RepoOutcome.Updated => new AdjustStockResult(
+                AdjustStockStatus.Updated,
+                await _cars.GetByIdAsync(dealerId, id, cancellationToken)),
+            RepoOutcome.WouldGoNegative => new AdjustStockResult(AdjustStockStatus.WouldGoNegative, null),
+            RepoOutcome.NotFound => new AdjustStockResult(AdjustStockStatus.NotFound, null),
+            _ => throw new InvalidOperationException($"Unhandled adjust outcome: {outcome}.")
+        };
     }
 }

@@ -18,6 +18,18 @@ public interface ICarService
 
     Task<Car?> UpdateStockAsync(
         int dealerId, int id, int stock, CancellationToken cancellationToken = default);
+
+    Task<AdjustStockResult> AdjustStockAsync(
+        int dealerId, int id, int delta, CancellationToken cancellationToken = default);
 }
 
 public sealed record AddCarResult(Car Car);
+
+public sealed record AdjustStockResult(AdjustStockStatus Status, Car? Car);
+
+public enum AdjustStockStatus
+{
+    Updated,
+    NotFound,
+    WouldGoNegative
+}

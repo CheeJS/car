@@ -137,6 +137,10 @@ Content-Type: {{contentType}}
   "stock": 7
 }
 
+### Who am I? (verify the token and see the dealer profile)
+GET {{host}}/api/auth/me
+Authorization: Bearer {{tokenA}}
+
 ###############################################################################
 # 6. Listing is dealer-scoped
 ###############################################################################
@@ -190,13 +194,31 @@ Content-Type: {{contentType}}
 # 9. Update and delete on your own cars
 ###############################################################################
 
-### A PATCH stock id=1 to 12
+### A PATCH stock id=1 to 12 (absolute set)
 PATCH {{host}}/api/cars/1/stock
 Authorization: Bearer {{tokenA}}
 Content-Type: {{contentType}}
 
 {
   "stock": 12
+}
+
+### A ADJUST stock id=1 by +3 (atomic relative change — safe under concurrent writes)
+PATCH {{host}}/api/cars/1/stock/adjust
+Authorization: Bearer {{tokenA}}
+Content-Type: {{contentType}}
+
+{
+  "delta": 3
+}
+
+### A ADJUST stock id=1 by a delta that would go below zero -> 400
+PATCH {{host}}/api/cars/1/stock/adjust
+Authorization: Bearer {{tokenA}}
+Content-Type: {{contentType}}
+
+{
+  "delta": -9999
 }
 
 ### A DELETE car id=3
@@ -255,3 +277,10 @@ Content-Type: {{contentType}}
 {
   "stock": 1
 }
+
+###############################################################################
+# 11. Health check (no auth required)
+###############################################################################
+
+### Liveness/readiness probe
+GET {{host}}/health

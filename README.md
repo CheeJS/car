@@ -1,5 +1,7 @@
 # OracleCMS Car Stock API
 
+[![CI](https://github.com/CheeJS/car/actions/workflows/ci.yml/badge.svg)](https://github.com/CheeJS/car/actions/workflows/ci.yml)
+
 A multi-tenant REST API for dealers to manage car stock. Built with ASP.NET Core 8, Dapper, and SQLite.
 
 ---
@@ -31,15 +33,21 @@ Required SDK: **.NET 8.0** (`dotnet --list-sdks` should include an `8.0.*` entry
 dotnet test
 ```
 
-22 tests across three suites:
+37 tests across two layers:
 
 | Suite | Focus |
 |---|---|
 | `AuthServiceTests` | BCrypt hashing, duplicate-email handling (case-insensitive), login success/failure paths, JWT shape |
 | `CarServiceTests` | Cross-dealer isolation on read/update/delete, search filtering (partial + case-insensitive), whitespace trimming |
+| `CarServiceAdjustStockTests` | Atomic stock adjustment: increment, decrement, exact zero, would-go-negative, cross-dealer not-found |
 | `GlobalExceptionMiddlewareTests` | 500 envelope shape, correlation ID, exception details never leak |
+| `ApiIntegrationTests` | End-to-end over the real HTTP pipeline via `WebApplicationFactory<Program>` — full CRUD flow, cross-dealer 404, `/me`, `/health`, **concurrent decrement race** proving stock never goes negative under 20 parallel adjustments |
 
-Tests use Microsoft.Data.Sqlite's shared in-memory database — no files written, no cleanup needed.
+Unit tests use Microsoft.Data.Sqlite's shared in-memory database; integration tests reuse the same pattern under `WebApplicationFactory`. No files written, no cleanup needed.
+
+### Continuous integration
+
+Every push and pull request runs `dotnet build && dotnet test` on Ubuntu via GitHub Actions (`.github/workflows/ci.yml`). The badge at the top of this README reflects the latest run.
 
 ---
 
@@ -53,14 +61,17 @@ Or hit Swagger UI: click **Authorize**, paste a JWT, and use the interactive for
 
 | Method | Route | Auth | Returns |
 |---|---|---|---|
-| POST   | `/api/auth/register`       | no  | 201, 400, 409 |
-| POST   | `/api/auth/login`          | no  | 200 + token, 400, 401 |
-| GET    | `/api/cars`                | JWT | 200, 401 |
-| GET    | `/api/cars?make=…&model=…` | JWT | 200, 401 — partial, case-insensitive |
-| POST   | `/api/cars`                | JWT | 201 + `Location`, 400, 401 |
-| GET    | `/api/cars/{id}`           | JWT | 200, 401, 404 |
-| DELETE | `/api/cars/{id}`           | JWT | 204, 401, 404 |
-| PATCH  | `/api/cars/{id}/stock`     | JWT | 200, 400, 401, 404 |
+| POST   | `/api/auth/register`              | no  | 201, 400, 409, **429** |
+| POST   | `/api/auth/login`                 | no  | 200 + token, 400, 401, **429** |
+| GET    | `/api/auth/me`                    | JWT | 200 + profile, 401 |
+| GET    | `/api/cars`                       | JWT | 200, 401 |
+| GET    | `/api/cars?make=…&model=…`        | JWT | 200, 401 — partial, case-insensitive |
+| POST   | `/api/cars`                       | JWT | 201 + `Location`, 400, 401 |
+| GET    | `/api/cars/{id}`                  | JWT | 200, 401, 404 |
+| DELETE | `/api/cars/{id}`                  | JWT | 204, 401, 404 |
+| PATCH  | `/api/cars/{id}/stock`            | JWT | 200, 400, 401, 404 — sets stock |
+| PATCH  | `/api/cars/{id}/stock/adjust`     | JWT | 200, 400, 401, 404 — atomic delta |
+| GET    | `/health`                         | no  | 200, 503 |
 
 ### Example: register → login → add a car
 
@@ -113,6 +124,8 @@ Strict layered separation: controllers never talk to repositories directly, repo
 | JWT signing | HMAC-SHA256 with a secret loaded from configuration; startup refuses to boot if the secret is the documented placeholder or shorter than 32 bytes. |
 | Unhandled errors | `GlobalExceptionMiddleware` logs the full exception server-side with a correlation ID; the client receives only `{ "error": "An unexpected error occurred.", "correlationId": "…" }`. No stack traces, no exception types in responses. |
 | Login enumeration | Wrong password and unknown email return the same 401 message. |
+| Brute force | `/api/auth/register` and `/api/auth/login` are behind a fixed-window rate limiter (30 requests / minute / IP). 31st request returns 429. |
+| Stock race conditions | `PATCH /api/cars/{id}/stock/adjust` performs `UPDATE … SET Stock = Stock + @Delta WHERE … AND Stock + @Delta >= 0` in a single SQL statement. Concurrent decrements compose correctly — proven by an integration test that fires 20 parallel `-1` adjustments against a stock of 10 and asserts exactly 10 succeed, 10 are rejected, and the final stock is 0. |
 
 ### Error response shape
 
@@ -199,3 +212,8 @@ requests.http
 - **JWT placeholder guard** — `Program.cs` refuses to start if the secret is still the documented placeholder. Better to fail loud than ship a misconfigured prod.
 - **Dynamic year validation** — `[Range(1886, 9999)]` plus a runtime check against `DateTime.UtcNow.Year + 1` (data annotations can't reference runtime values).
 - **`GetById` is exposed in addition to the spec's four required car operations** — needed to back `CreatedAtAction`'s `Location` header on POST. Useful for clients that want to refetch a single car by ID.
+- **Two stock-mutation endpoints** — `PATCH /stock` overwrites, `PATCH /stock/adjust` applies a delta. The adjust variant is the one to reach for in real client code: it's atomic, concurrent-safe, and refuses to take stock negative. The set-variant is kept for ergonomics (single PATCH to fix bookkeeping).
+- **Rate-limited auth endpoints** — 30 requests/minute/IP via .NET 8's built-in `RateLimiter`. Tight enough to deter brute force; loose enough not to interfere with normal usage or integration tests.
+- **`GET /api/auth/me`** — convenience endpoint for clients that need to display the logged-in dealer without round-tripping the email on each request. Doubles as a quick token-validity probe.
+- **`GET /health`** — opens a SQLite connection and runs `SELECT 1`. Returns 200 + `{status: "Healthy"}` or 503 + diagnostics. Ready for load balancers or Kubernetes liveness probes.
+- **Integration tests via `WebApplicationFactory<Program>`** — only the connection string is overridden (to a per-fixture in-memory SQLite). JWT secret comes from `appsettings.Development.json` so AuthService and the bearer middleware automatically agree.

@@ -113,6 +113,38 @@ public sealed class CarRepository : ICarRepository
         return rows > 0;
     }
 
+    public async Task<AdjustStockOutcome> AdjustStockAsync(
+        int dealerId, int id, int delta, CancellationToken cancellationToken = default)
+    {
+        const string adjustSql = @"
+            UPDATE Cars
+            SET Stock = Stock + @Delta
+            WHERE Id = @Id
+              AND DealerId = @DealerId
+              AND Stock + @Delta >= 0;";
+
+        const string existsSql = @"
+            SELECT 1 FROM Cars
+            WHERE Id = @Id AND DealerId = @DealerId
+            LIMIT 1;";
+
+        using var connection = _factory.Create();
+
+        var rows = await connection.ExecuteAsync(new CommandDefinition(
+            adjustSql,
+            new { Id = id, DealerId = dealerId, Delta = delta },
+            cancellationToken: cancellationToken));
+
+        if (rows > 0) return AdjustStockOutcome.Updated;
+
+        var exists = await connection.ExecuteScalarAsync<int?>(new CommandDefinition(
+            existsSql,
+            new { Id = id, DealerId = dealerId },
+            cancellationToken: cancellationToken));
+
+        return exists.HasValue ? AdjustStockOutcome.WouldGoNegative : AdjustStockOutcome.NotFound;
+    }
+
     private static string? NullIfBlank(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 }

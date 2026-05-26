@@ -18,4 +18,14 @@ public interface ICarRepository
 
     Task<bool> UpdateStockAsync(
         int dealerId, int id, int stock, CancellationToken cancellationToken = default);
+
+    Task<AdjustStockOutcome> AdjustStockAsync(
+        int dealerId, int id, int delta, CancellationToken cancellationToken = default);
+}
+
+public enum AdjustStockOutcome
+{
+    Updated,
+    NotFound,
+    WouldGoNegative
 }

@@ -1,6 +1,12 @@
+using System.Reflection;
 using System.Text;
+using System.Text.Json;
+using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using OracleCMS.CarStock.API.Data;
@@ -83,6 +89,37 @@ builder.Services
 
 builder.Services.AddAuthorization();
 
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.OnRejected = async (context, cancellationToken) =>
+    {
+        context.HttpContext.Response.ContentType = "application/json; charset=utf-8";
+        var payload = JsonSerializer.Serialize(new
+        {
+            error = "Too many requests",
+            detail = "Rate limit exceeded. Slow down and try again shortly."
+        });
+        await context.HttpContext.Response.WriteAsync(payload, cancellationToken);
+    };
+
+    options.AddPolicy("auth", httpContext =>
+    {
+        var key = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+        return RateLimitPartition.GetFixedWindowLimiter(key, _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 30,
+            Window = TimeSpan.FromMinutes(1),
+            QueueLimit = 0,
+            QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+            AutoReplenishment = true
+        });
+    });
+});
+
+builder.Services.AddHealthChecks()
+    .AddCheck<SqliteHealthCheck>("sqlite", tags: new[] { "ready" });
+
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
@@ -92,6 +129,13 @@ builder.Services.AddSwaggerGen(c =>
         Version = "v1",
         Description = "Multi-tenant car stock management API for dealers."
     });
+
+    var xmlPath = Path.Combine(AppContext.BaseDirectory,
+        $"{Assembly.GetExecutingAssembly().GetName().Name}.xml");
+    if (File.Exists(xmlPath))
+    {
+        c.IncludeXmlComments(xmlPath, includeControllerXmlComments: true);
+    }
 
     var bearerScheme = new OpenApiSecurityScheme
     {
@@ -128,11 +172,36 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
+app.UseRateLimiter();
+
 app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
 
+app.MapHealthChecks("/health", new HealthCheckOptions
+{
+    ResponseWriter = async (context, report) =>
+    {
+        context.Response.ContentType = "application/json; charset=utf-8";
+        var payload = JsonSerializer.Serialize(new
+        {
+            status = report.Status.ToString(),
+            checks = report.Entries.Select(e => new
+            {
+                name = e.Key,
+                status = e.Value.Status.ToString(),
+                description = e.Value.Description
+            }),
+            durationMs = report.TotalDuration.TotalMilliseconds
+        });
+        await context.Response.WriteAsync(payload);
+    }
+});
+
 app.Run();
 
+/// <summary>
+/// Marker partial used by integration tests to discover the host via WebApplicationFactory.
+/// </summary>
 public partial class Program;
