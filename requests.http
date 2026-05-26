@@ -1,0 +1,257 @@
+### OracleCMS Car Stock API — end-to-end manual test flow
+###
+### Default port = http://localhost:5266 (set by Properties/launchSettings.json).
+### Run with: dotnet run --project src/OracleCMS.CarStock.API
+### After login, copy the returned token into @tokenA / @tokenB below, then send the
+### subsequent requests. Most editors (VS 2022, Rider, VS Code REST Client) support
+### @variables defined inline.
+
+@host = http://localhost:5266
+@contentType = application/json
+
+###############################################################################
+# 1. Register two dealers
+###############################################################################
+
+### Register dealer A
+POST {{host}}/api/auth/register
+Content-Type: {{contentType}}
+
+{
+  "email": "dealer-a@example.com",
+  "password": "SecurePassA1!"
+}
+
+### Register dealer B
+POST {{host}}/api/auth/register
+Content-Type: {{contentType}}
+
+{
+  "email": "dealer-b@example.com",
+  "password": "SecurePassB1!"
+}
+
+### Re-registering A's email -> 409 Conflict
+POST {{host}}/api/auth/register
+Content-Type: {{contentType}}
+
+{
+  "email": "dealer-a@example.com",
+  "password": "SecurePassA1!"
+}
+
+###############################################################################
+# 2. Log in and capture tokens
+###############################################################################
+
+### Login as A (paste the "token" field into @tokenA below)
+POST {{host}}/api/auth/login
+Content-Type: {{contentType}}
+
+{
+  "email": "dealer-a@example.com",
+  "password": "SecurePassA1!"
+}
+
+### Login as B (paste the "token" field into @tokenB below)
+POST {{host}}/api/auth/login
+Content-Type: {{contentType}}
+
+{
+  "email": "dealer-b@example.com",
+  "password": "SecurePassB1!"
+}
+
+### Wrong password -> 401
+POST {{host}}/api/auth/login
+Content-Type: {{contentType}}
+
+{
+  "email": "dealer-a@example.com",
+  "password": "wrong"
+}
+
+@tokenA = PASTE_DEALER_A_TOKEN_HERE
+@tokenB = PASTE_DEALER_B_TOKEN_HERE
+
+###############################################################################
+# 3. Unauthenticated access is rejected
+###############################################################################
+
+### GET /api/cars without a token -> 401
+GET {{host}}/api/cars
+
+###############################################################################
+# 4. Dealer A adds cars
+###############################################################################
+
+### A POST Audi A4
+POST {{host}}/api/cars
+Authorization: Bearer {{tokenA}}
+Content-Type: {{contentType}}
+
+{
+  "make": "Audi",
+  "model": "A4",
+  "year": 2018,
+  "stock": 5
+}
+
+### A POST Audi A6
+POST {{host}}/api/cars
+Authorization: Bearer {{tokenA}}
+Content-Type: {{contentType}}
+
+{
+  "make": "Audi",
+  "model": "A6",
+  "year": 2020,
+  "stock": 2
+}
+
+### A POST BMW 320i
+POST {{host}}/api/cars
+Authorization: Bearer {{tokenA}}
+Content-Type: {{contentType}}
+
+{
+  "make": "BMW",
+  "model": "320i",
+  "year": 2022,
+  "stock": 3
+}
+
+###############################################################################
+# 5. Dealer B adds a car
+###############################################################################
+
+### B POST Toyota Corolla
+POST {{host}}/api/cars
+Authorization: Bearer {{tokenB}}
+Content-Type: {{contentType}}
+
+{
+  "make": "Toyota",
+  "model": "Corolla",
+  "year": 2019,
+  "stock": 7
+}
+
+###############################################################################
+# 6. Listing is dealer-scoped
+###############################################################################
+
+### A's list (Audi A4, Audi A6, BMW 320i)
+GET {{host}}/api/cars
+Authorization: Bearer {{tokenA}}
+
+### B's list (Toyota Corolla only)
+GET {{host}}/api/cars
+Authorization: Bearer {{tokenB}}
+
+###############################################################################
+# 7. Search by make and model (partial, case-insensitive)
+###############################################################################
+
+### A search make=audi -> Audi A4 + Audi A6
+GET {{host}}/api/cars?make=audi
+Authorization: Bearer {{tokenA}}
+
+### A search model=A -> Audi A4 + Audi A6
+GET {{host}}/api/cars?model=A
+Authorization: Bearer {{tokenA}}
+
+### A search make=audi&model=a4 -> Audi A4 only
+GET {{host}}/api/cars?make=audi&model=a4
+Authorization: Bearer {{tokenA}}
+
+###############################################################################
+# 8. Cross-dealer isolation — A's car id=1 is invisible to B (404, never 403)
+###############################################################################
+
+### B GET car id=1 (belongs to A) -> 404
+GET {{host}}/api/cars/1
+Authorization: Bearer {{tokenB}}
+
+### B DELETE car id=1 (belongs to A) -> 404
+DELETE {{host}}/api/cars/1
+Authorization: Bearer {{tokenB}}
+
+### B PATCH stock of car id=1 (belongs to A) -> 404
+PATCH {{host}}/api/cars/1/stock
+Authorization: Bearer {{tokenB}}
+Content-Type: {{contentType}}
+
+{
+  "stock": 999
+}
+
+###############################################################################
+# 9. Update and delete on your own cars
+###############################################################################
+
+### A PATCH stock id=1 to 12
+PATCH {{host}}/api/cars/1/stock
+Authorization: Bearer {{tokenA}}
+Content-Type: {{contentType}}
+
+{
+  "stock": 12
+}
+
+### A DELETE car id=3
+DELETE {{host}}/api/cars/3
+Authorization: Bearer {{tokenA}}
+
+### A list after update + delete
+GET {{host}}/api/cars
+Authorization: Bearer {{tokenA}}
+
+###############################################################################
+# 10. Validation errors
+###############################################################################
+
+### Year out of range -> 400
+POST {{host}}/api/cars
+Authorization: Bearer {{tokenA}}
+Content-Type: {{contentType}}
+
+{
+  "make": "Ford",
+  "model": "Model T",
+  "year": 1500,
+  "stock": 1
+}
+
+### Negative stock -> 400
+POST {{host}}/api/cars
+Authorization: Bearer {{tokenA}}
+Content-Type: {{contentType}}
+
+{
+  "make": "Ford",
+  "model": "Focus",
+  "year": 2020,
+  "stock": -1
+}
+
+### Empty make -> 400
+POST {{host}}/api/cars
+Authorization: Bearer {{tokenA}}
+Content-Type: {{contentType}}
+
+{
+  "make": "",
+  "model": "Focus",
+  "year": 2020,
+  "stock": 1
+}
+
+### Stock update on non-existent id -> 404
+PATCH {{host}}/api/cars/9999/stock
+Authorization: Bearer {{tokenA}}
+Content-Type: {{contentType}}
+
+{
+  "stock": 1
+}

@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/OracleCMS.CarStock.API/OracleCMS.CarStock.API.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/OracleCMS.CarStock.Tests/OracleCMS.CarStock.Tests.csproj" />
+  </Folder>
+</Solution>
