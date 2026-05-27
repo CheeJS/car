@@ -28,7 +28,7 @@ Content-Type: {{contentType}}
 
 {
   "email": "bob@dealership.com",
-  "password": "BobPass1!"
+  "password": "SecurePassB1!"
 }
 
 ### Re-registering A's email -> 409 Conflict
@@ -71,7 +71,7 @@ Content-Type: {{contentType}}
   "password": "wrong"
 }
 
-@tokenA = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIiwiaHR0cDovL3NjaGVtYXMueG1sc29hcC5vcmcvd3MvMjAwNS8wNS9pZGVudGl0eS9jbGFpbXMvbmFtZWlkZW50aWZpZXIiOiIxIiwiZW1haWwiOiJhbGljZUBkZWFsZXJzaGlwLmNvbSIsImp0aSI6ImViNzRkY2E4LTI2NGItNGQyZi05ZjAyLTBmYTNkZjkyMDA3OCIsIm5iZiI6MTc3OTg1Njk2MiwiZXhwIjoxNzc5ODYwNTYyLCJpc3MiOiJPcmFjbGVDTVMuQ2FyU3RvY2siLCJhdWQiOiJPcmFjbGVDTVMuQ2FyU3RvY2suRGVhbGVycyJ9.e3q7auPAc31QfojM6ir-uSpAC0mbMgcru5It73164DQ
+@tokenA = PASTE_DEALER_A_TOKEN_HERE
 @tokenB = PASTE_DEALER_B_TOKEN_HERE
 
 ###############################################################################

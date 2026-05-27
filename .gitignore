@@ -26,9 +26,6 @@ out/
 *.userosscache
 *.sln.docstates
 
-## Claude Code tooling state
-.claude/
-
 ## OS junk
 .DS_Store
 Thumbs.db
