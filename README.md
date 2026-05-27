@@ -57,16 +57,18 @@ Every push and pull request runs `dotnet build && dotnet test` on Ubuntu via Git
 
 Or hit Swagger UI: click **Authorize**, paste a JWT, and use the interactive forms.
 
-### Suggested test credentials
+### Pre-populated sample database
 
-If you're testing locally, two example dealer accounts (used throughout `requests.http`):
+The repo ships with `src/OracleCMS.CarStock.API/Data/carstock.db` already populated, so you can log in immediately without registering anything:
 
-| Email | Password |
-|---|---|
-| `alice@dealership.com` | `AlicePass1!` |
-| `bob@dealership.com`   | `BobPass1!`  |
+| Email | Password | Inventory |
+|---|---|---|
+| `alice@dealership.com` | `AlicePass1!` | Audi A4 (2018, stock 5), Audi A6 (2020, stock 2), BMW 320i (2022, stock 3) |
+| `bob@dealership.com`   | `BobPass1!`  | Toyota Corolla (2019, stock 7) |
 
-Both satisfy the complexity rule (uppercase, lowercase, digit, special character). If you've already registered these emails on a previous run you'll get a **409 Conflict** — skip straight to login, or delete `src/OracleCMS.CarStock.API/Data/carstock.db` to start fresh.
+Both passwords satisfy the complexity rule (uppercase, lowercase, digit, special character).
+
+**To start from an empty database** (e.g., to run `requests.http` end-to-end from the Register step), delete `src/OracleCMS.CarStock.API/Data/carstock.db` and restart the API — `DatabaseInitializer` recreates the schema on startup.
 
 ### Endpoint summary
 

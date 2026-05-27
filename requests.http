@@ -5,6 +5,15 @@
 ### After login, copy the returned token into @tokenA / @tokenB below, then send the
 ### subsequent requests. Most editors (VS 2022, Rider, VS Code REST Client) support
 ### @variables defined inline.
+###
+### -----------------------------------------------------------------------------
+### NOTE: The shipped carstock.db is pre-populated with Alice, Bob, and the four
+### cars below. To run this file end-to-end from a clean slate, delete
+### src/OracleCMS.CarStock.API/Data/carstock.db and restart the API first.
+### Otherwise the first two Register requests return 409 (expected — dealers
+### already exist), and Add-Car requests create duplicates of existing inventory.
+### Login / search / cross-dealer / stock-adjust flows all work either way.
+### -----------------------------------------------------------------------------
 
 @host = http://localhost:5266
 @contentType = application/json
@@ -28,7 +37,7 @@ Content-Type: {{contentType}}
 
 {
   "email": "bob@dealership.com",
-  "password": "SecurePassB1!"
+  "password": "BobPass1!"
 }
 
 ### Re-registering A's email -> 409 Conflict

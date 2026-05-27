@@ -16,6 +16,8 @@ out/
 *.db-journal
 *.db-shm
 *.db-wal
+# Sample database is committed so the repo includes demo data per the spec.
+!src/OracleCMS.CarStock.API/Data/carstock.db
 
 ## Visual Studio / Rider / VS Code
 .vs/
