@@ -57,6 +57,17 @@ Every push and pull request runs `dotnet build && dotnet test` on Ubuntu via Git
 
 Or hit Swagger UI: click **Authorize**, paste a JWT, and use the interactive forms.
 
+### Suggested test credentials
+
+If you're testing locally, two example dealer accounts (used throughout `requests.http`):
+
+| Email | Password |
+|---|---|
+| `alice@dealership.com` | `AlicePass1!` |
+| `bob@dealership.com`   | `BobPass1!`  |
+
+Both satisfy the complexity rule (uppercase, lowercase, digit, special character). If you've already registered these emails on a previous run you'll get a **409 Conflict** — skip straight to login, or delete `src/OracleCMS.CarStock.API/Data/carstock.db` to start fresh.
+
 ### Endpoint summary
 
 | Method | Route | Auth | Returns |

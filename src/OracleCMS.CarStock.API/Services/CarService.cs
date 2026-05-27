@@ -29,16 +29,10 @@ public sealed class CarService : ICarService
         var trimmedModel = model.Trim();
 
         var newId = await _cars.AddAsync(dealerId, trimmedMake, trimmedModel, year, stock, cancellationToken);
+        var car = await _cars.GetByIdAsync(dealerId, newId, cancellationToken)
+            ?? throw new InvalidOperationException($"Newly inserted car id={newId} could not be fetched.");
 
-        return new AddCarResult(new Car
-        {
-            Id = newId,
-            DealerId = dealerId,
-            Make = trimmedMake,
-            Model = trimmedModel,
-            Year = year,
-            Stock = stock
-        });
+        return new AddCarResult(car);
     }
 
     public Task<bool> DeleteAsync(
