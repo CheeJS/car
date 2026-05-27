@@ -8,4 +8,6 @@ public sealed class Car
     public string Model { get; set; } = string.Empty;
     public int Year { get; set; }
     public int Stock { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
 }

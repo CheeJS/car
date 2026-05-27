@@ -9,6 +9,8 @@ public sealed class CarResponse
     public string Model { get; set; } = string.Empty;
     public int Year { get; set; }
     public int Stock { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
 
     public static CarResponse FromEntity(Car car) => new()
     {
@@ -16,6 +18,8 @@ public sealed class CarResponse
         Make = car.Make,
         Model = car.Model,
         Year = car.Year,
-        Stock = car.Stock
+        Stock = car.Stock,
+        CreatedAt = car.CreatedAt,
+        UpdatedAt = car.UpdatedAt
     };
 }

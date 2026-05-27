@@ -18,9 +18,6 @@ using OracleCMS.CarStock.API.Services.Interfaces;
 
 var builder = WebApplication.CreateBuilder(args);
 
-var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
-    ?? throw new InvalidOperationException("Missing ConnectionStrings:DefaultConnection.");
-
 var jwtSection = builder.Configuration.GetSection("Jwt");
 var jwtSecret = jwtSection["Secret"]
     ?? throw new InvalidOperationException("Missing Jwt:Secret.");
@@ -40,8 +37,12 @@ if (jwtSecret == "REPLACE_WITH_32_CHAR_MIN_SECRET_KEY_HERE")
         "Jwt:Secret is still the placeholder. Set a real secret via appsettings.Development.json, user-secrets, or environment variables.");
 }
 
-builder.Services.AddSingleton<ISqliteConnectionFactory>(
-    _ => new SqliteConnectionFactory(connectionString));
+builder.Services.AddSingleton<ISqliteConnectionFactory>(sp =>
+{
+    var cs = sp.GetRequiredService<IConfiguration>().GetConnectionString("DefaultConnection")
+        ?? throw new InvalidOperationException("Missing ConnectionStrings:DefaultConnection.");
+    return new SqliteConnectionFactory(cs);
+});
 
 builder.Services.Configure<JwtOptions>(jwtSection);
 
@@ -158,9 +159,11 @@ builder.Services.AddSwaggerGen(c =>
     });
 });
 
-DatabaseInitializer.Initialize(connectionString);
-
 var app = builder.Build();
+
+var connectionString = app.Configuration.GetConnectionString("DefaultConnection")
+    ?? throw new InvalidOperationException("Missing ConnectionStrings:DefaultConnection.");
+DatabaseInitializer.Initialize(connectionString);
 
 app.UseMiddleware<GlobalExceptionMiddleware>();
 

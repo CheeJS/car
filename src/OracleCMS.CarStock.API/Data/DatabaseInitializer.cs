@@ -43,7 +43,9 @@ public static class DatabaseInitializer
                 Make      TEXT    NOT NULL,
                 Model     TEXT    NOT NULL,
                 Year      INTEGER NOT NULL,
-                Stock     INTEGER NOT NULL DEFAULT 0
+                Stock     INTEGER NOT NULL DEFAULT 0,
+                CreatedAt TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+                UpdatedAt TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
             );
 
             CREATE INDEX IF NOT EXISTS IX_Cars_DealerId ON Cars(DealerId);

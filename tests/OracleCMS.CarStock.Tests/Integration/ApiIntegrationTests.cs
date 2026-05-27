@@ -220,4 +220,117 @@ public sealed class ApiIntegrationTests : IClassFixture<CarStockWebAppFactory>
         var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         Assert.Equal("Healthy", body.RootElement.GetProperty("status").GetString());
     }
+
+    [Fact]
+    public async Task Register_InvalidEmailFormat_Returns400()
+    {
+        var client = NewClient();
+
+        var response = await client.PostAsJsonAsync("/api/auth/register",
+            new { email = "not-an-email", password = "SecurePass1!" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Register_PasswordTooShort_Returns400()
+    {
+        var client = NewClient();
+
+        var response = await client.PostAsJsonAsync("/api/auth/register",
+            new { email = $"short-{Guid.NewGuid():N}@example.com", password = "Ab1!" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Register_MissingEmail_Returns400()
+    {
+        var client = NewClient();
+
+        var response = await client.PostAsJsonAsync("/api/auth/register",
+            new { password = "SecurePass1!" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Register_MissingPassword_Returns400()
+    {
+        var client = NewClient();
+
+        var response = await client.PostAsJsonAsync("/api/auth/register",
+            new { email = $"nopwd-{Guid.NewGuid():N}@example.com" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Register_DuplicateEmail_Returns409()
+    {
+        var client = NewClient();
+        var email = $"dup-{Guid.NewGuid():N}@example.com";
+        await client.PostAsJsonAsync("/api/auth/register", new { email, password = "SecurePass1!" });
+
+        var response = await client.PostAsJsonAsync("/api/auth/register",
+            new { email, password = "SecurePass1!" });
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task AddCar_YearTooOld_Returns400()
+    {
+        var client = NewClient();
+        var token = await RegisterAndLoginAsync(
+            client, $"old-{Guid.NewGuid():N}@example.com", "SecurePass1!");
+        SetToken(client, token);
+
+        var response = await client.PostAsJsonAsync("/api/cars",
+            new { make = "Ford", model = "T", year = 1885, stock = 1 });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task AddCar_YearTooFuture_Returns400()
+    {
+        var client = NewClient();
+        var token = await RegisterAndLoginAsync(
+            client, $"future-{Guid.NewGuid():N}@example.com", "SecurePass1!");
+        SetToken(client, token);
+
+        var response = await client.PostAsJsonAsync("/api/cars",
+            new { make = "Ford", model = "T", year = DateTime.UtcNow.Year + 2, stock = 1 });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task AddCar_NegativeStock_Returns400()
+    {
+        var client = NewClient();
+        var token = await RegisterAndLoginAsync(
+            client, $"negstock-{Guid.NewGuid():N}@example.com", "SecurePass1!");
+        SetToken(client, token);
+
+        var response = await client.PostAsJsonAsync("/api/cars",
+            new { make = "Ford", model = "T", year = 2020, stock = -1 });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task AddCar_MissingMake_Returns400()
+    {
+        var client = NewClient();
+        var token = await RegisterAndLoginAsync(
+            client, $"nomake-{Guid.NewGuid():N}@example.com", "SecurePass1!");
+        SetToken(client, token);
+
+        var response = await client.PostAsJsonAsync("/api/cars",
+            new { model = "T", year = 2020, stock = 1 });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
 }

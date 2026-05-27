@@ -33,7 +33,7 @@ Required SDK: **.NET 8.0** (`dotnet --list-sdks` should include an `8.0.*` entry
 dotnet test
 ```
 
-37 tests across two layers:
+46 tests across two layers:
 
 | Suite | Focus |
 |---|---|
@@ -41,7 +41,7 @@ dotnet test
 | `CarServiceTests` | Cross-dealer isolation on read/update/delete, search filtering (partial + case-insensitive), whitespace trimming |
 | `CarServiceAdjustStockTests` | Atomic stock adjustment: increment, decrement, exact zero, would-go-negative, cross-dealer not-found |
 | `GlobalExceptionMiddlewareTests` | 500 envelope shape, correlation ID, exception details never leak |
-| `ApiIntegrationTests` | End-to-end over the real HTTP pipeline via `WebApplicationFactory<Program>` — full CRUD flow, cross-dealer 404, `/me`, `/health`, **concurrent decrement race** proving stock never goes negative under 20 parallel adjustments |
+| `ApiIntegrationTests` | End-to-end over the real HTTP pipeline via `WebApplicationFactory<Program>` — full CRUD flow, cross-dealer 404, `/me`, `/health`, **concurrent decrement race** proving stock never goes negative under 20 parallel adjustments, validation failure paths (400/409) |
 
 Unit tests use Microsoft.Data.Sqlite's shared in-memory database; integration tests reuse the same pattern under `WebApplicationFactory`. No files written, no cleanup needed.
 
@@ -119,7 +119,7 @@ Strict layered separation: controllers never talk to repositories directly, repo
 
 | Concern | Implementation |
 |---|---|
-| Passwords | BCrypt with work factor 12 (`BCrypt.Net-Next`). Stored hashes verified to start with `$2…` by an automated test. |
+| Passwords | BCrypt with work factor 12 (`BCrypt.Net-Next`). Stored hashes verified to start with `$2…` by an automated test. Registration enforces complexity via a custom `[PasswordComplexity]` attribute: uppercase, lowercase, digit, and special character all required. |
 | SQL injection | All queries use Dapper's `@Name` parameters bound via anonymous objects. No string interpolation, no concatenation. Tests cover the search path. |
 | JWT signing | HMAC-SHA256 with a secret loaded from configuration; startup refuses to boot if the secret is the documented placeholder or shorter than 32 bytes. |
 | Unhandled errors | `GlobalExceptionMiddleware` logs the full exception server-side with a correlation ID; the client receives only `{ "error": "An unexpected error occurred.", "correlationId": "…" }`. No stack traces, no exception types in responses. |
@@ -179,12 +179,14 @@ CREATE TABLE Dealers (
 );
 
 CREATE TABLE Cars (
-    Id       INTEGER PRIMARY KEY AUTOINCREMENT,
-    DealerId INTEGER NOT NULL REFERENCES Dealers(Id),
-    Make     TEXT    NOT NULL,
-    Model    TEXT    NOT NULL,
-    Year     INTEGER NOT NULL,
-    Stock    INTEGER NOT NULL DEFAULT 0
+    Id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    DealerId  INTEGER NOT NULL REFERENCES Dealers(Id),
+    Make      TEXT    NOT NULL,
+    Model     TEXT    NOT NULL,
+    Year      INTEGER NOT NULL,
+    Stock     INTEGER NOT NULL DEFAULT 0,
+    CreatedAt TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    UpdatedAt TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 
 CREATE INDEX IX_Cars_DealerId ON Cars(DealerId);
@@ -211,7 +213,7 @@ requests.http
 - **404 not 403 on cross-dealer access** — preserves indistinguishability between "not yours" and "doesn't exist."
 - **`UPDATE … WHERE Id=@Id AND DealerId=@DealerId`** — atomic ownership check in SQL; no read-then-write race window.
 - **`COLLATE NOCASE` on the `Dealers.Email` column + unique index** — case-insensitive uniqueness enforced by the DB, not just by the service.
-- **`public partial class Program;`** — lets tests use `WebApplicationFactory<Program>` if integration tests get added later.
+- **`public partial class Program;`** — top-level statement programs generate an implicit, inaccessible `Program` class; the `partial` declaration makes it visible across assembly boundaries so `WebApplicationFactory<Program>` in the integration test suite can boot a real in-process server against the same composition root the production API uses.
 - **JWT placeholder guard** — `Program.cs` refuses to start if the secret is still the documented placeholder. Better to fail loud than ship a misconfigured prod.
 - **Dynamic year validation** — `[Range(1886, 9999)]` plus a runtime check against `DateTime.UtcNow.Year + 1` (data annotations can't reference runtime values).
 - **`GetById` is exposed in addition to the spec's four required car operations** — needed to back `CreatedAtAction`'s `Location` header on POST. Useful for clients that want to refetch a single car by ID.
@@ -220,3 +222,19 @@ requests.http
 - **`GET /api/auth/me`** — convenience endpoint for clients that need to display the logged-in dealer without round-tripping the email on each request. Doubles as a quick token-validity probe.
 - **`GET /health`** — opens a SQLite connection and runs `SELECT 1`. Returns 200 + `{status: "Healthy"}` or 503 + diagnostics. Ready for load balancers or Kubernetes liveness probes.
 - **Integration tests via `WebApplicationFactory<Program>`** — only the connection string is overridden (to a per-fixture in-memory SQLite). JWT secret comes from `appsettings.Development.json` so AuthService and the bearer middleware automatically agree.
+
+---
+
+## What I'd build next
+
+| # | Feature | Why it matters |
+|---|---|---|
+| 1 | **Refresh token rotation** | JWT expiry is currently 60 minutes. Short-lived access tokens (5–15 min) paired with rotating refresh tokens stored server-side allow a compromised token to be revoked instantly without forcing the dealer to re-authenticate. The current design has no revocation path — once a token is signed, it's valid until expiry. |
+| 2 | **Pagination on `GET /api/cars`** | A dealer with 5,000 cars in stock receives all of them in a single response today. Adding `page` / `pageSize` query parameters and a `X-Total-Count` header keeps response sizes predictable, makes the endpoint cacheable per page, and is a prerequisite for any frontend list view. |
+| 3 | **Structured logging (Serilog)** | The built-in `ILogger` writes plain text. Serilog with JSON sinks (Seq, Datadog, CloudWatch) emits correlation IDs, dealer IDs, and request durations as queryable fields rather than substrings to grep for. This is the difference between `SELECT * WHERE correlationId = '…'` and `grep '…' /var/log/*.log`. |
+| 4 | **Distributed rate limiting (Redis)** | The current `FixedWindowRateLimiter` is in-process. A load-balanced deployment with N instances gives each dealer N × 30 attempts per minute because each instance maintains its own counter. Moving the counter to Redis makes the limit global regardless of how many instances are running. |
+| 5 | **OpenTelemetry traces** | When a request is slow it's currently opaque — is it BCrypt, the DB query, or middleware? Adding trace context propagation (via `System.Diagnostics.Activity` + an OTLP exporter) lets a single slow request be broken down into labelled spans without manually timing each layer. |
+| 6 | **Role-based permissions** | Any authenticated dealer can mutate their own stock. A real system distinguishes a "stock manager" role (read + write) from a "viewer" role (read-only). This maps cleanly to JWT claims + ASP.NET Core policy-based authorization and requires no schema changes — just an extra claim at registration and `[Authorize(Policy = "StockManager")]` on mutating endpoints. |
+| 7 | **Docker + Compose file** | A `docker compose up` that starts the API with an injected `Jwt__Secret` environment variable and mounts a volume for the SQLite file removes the "install .NET 8 SDK" prerequisite for evaluators and mirrors a minimal production deployment. |
+| 8 | **Password hardening beyond complexity rules** | `RegisterRequest` already enforces complexity via `[PasswordComplexity]` (uppercase, digit, special character required). The next step is a HIBP (Have I Been Pwned) breach-check at registration: hash the password with SHA-1, send the first 5 hex characters to the k-anonymity API, and reject passwords that appear in known breach sets — without ever sending the full password to a third party. |
+

@@ -18,7 +18,7 @@ public sealed class CarRepository : ICarRepository
         int dealerId, string? make, string? model, CancellationToken cancellationToken = default)
     {
         const string sql = @"
-            SELECT Id, DealerId, Make, Model, Year, Stock
+            SELECT Id, DealerId, Make, Model, Year, Stock, CreatedAt, UpdatedAt
             FROM Cars
             WHERE DealerId = @DealerId
               AND (@Make  IS NULL OR Make  LIKE '%' || @Make  || '%' COLLATE NOCASE)
@@ -44,7 +44,7 @@ public sealed class CarRepository : ICarRepository
         int dealerId, int id, CancellationToken cancellationToken = default)
     {
         const string sql = @"
-            SELECT Id, DealerId, Make, Model, Year, Stock
+            SELECT Id, DealerId, Make, Model, Year, Stock, CreatedAt, UpdatedAt
             FROM Cars
             WHERE Id = @Id AND DealerId = @DealerId
             LIMIT 1;";
@@ -61,8 +61,8 @@ public sealed class CarRepository : ICarRepository
         int dealerId, string make, string model, int year, int stock, CancellationToken cancellationToken = default)
     {
         const string sql = @"
-            INSERT INTO Cars (DealerId, Make, Model, Year, Stock)
-            VALUES (@DealerId, @Make, @Model, @Year, @Stock);
+            INSERT INTO Cars (DealerId, Make, Model, Year, Stock, CreatedAt, UpdatedAt)
+            VALUES (@DealerId, @Make, @Model, @Year, @Stock, @CreatedAt, @UpdatedAt);
             SELECT last_insert_rowid();";
 
         using var connection = _factory.Create();
@@ -74,7 +74,9 @@ public sealed class CarRepository : ICarRepository
                 Make = make,
                 Model = model,
                 Year = year,
-                Stock = stock
+                Stock = stock,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
             },
             cancellationToken: cancellationToken);
         return await connection.ExecuteScalarAsync<int>(command);
@@ -101,13 +103,13 @@ public sealed class CarRepository : ICarRepository
     {
         const string sql = @"
             UPDATE Cars
-            SET Stock = @Stock
+            SET Stock = @Stock, UpdatedAt = @UpdatedAt
             WHERE Id = @Id AND DealerId = @DealerId;";
 
         using var connection = _factory.Create();
         var command = new CommandDefinition(
             sql,
-            new { Id = id, DealerId = dealerId, Stock = stock },
+            new { Id = id, DealerId = dealerId, Stock = stock, UpdatedAt = DateTime.UtcNow },
             cancellationToken: cancellationToken);
         var rows = await connection.ExecuteAsync(command);
         return rows > 0;
@@ -118,7 +120,7 @@ public sealed class CarRepository : ICarRepository
     {
         const string adjustSql = @"
             UPDATE Cars
-            SET Stock = Stock + @Delta
+            SET Stock = Stock + @Delta, UpdatedAt = @UpdatedAt
             WHERE Id = @Id
               AND DealerId = @DealerId
               AND Stock + @Delta >= 0;";
@@ -132,7 +134,7 @@ public sealed class CarRepository : ICarRepository
 
         var rows = await connection.ExecuteAsync(new CommandDefinition(
             adjustSql,
-            new { Id = id, DealerId = dealerId, Delta = delta },
+            new { Id = id, DealerId = dealerId, Delta = delta, UpdatedAt = DateTime.UtcNow },
             cancellationToken: cancellationToken));
 
         if (rows > 0) return AdjustStockOutcome.Updated;

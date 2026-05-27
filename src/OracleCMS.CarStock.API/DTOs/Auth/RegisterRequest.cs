@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using OracleCMS.CarStock.API.Validation;
 
 namespace OracleCMS.CarStock.API.DTOs.Auth;
 
@@ -12,5 +13,6 @@ public sealed class RegisterRequest
     [Required(ErrorMessage = "Password is required.")]
     [MinLength(8, ErrorMessage = "Password must be at least 8 characters.")]
     [MaxLength(128, ErrorMessage = "Password cannot exceed 128 characters.")]
+    [PasswordComplexity]
     public string Password { get; set; } = string.Empty;
 }
