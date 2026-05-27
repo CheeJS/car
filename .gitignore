@@ -3,7 +3,7 @@ bin/
 obj/
 out/
 
-## Test results / coverage
+## Test results
 [Tt]est[Rr]esult*/
 [Cc]overage*/
 *.coverage
