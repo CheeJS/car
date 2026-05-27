@@ -164,7 +164,9 @@ public sealed class CarsController : ControllerBase
         var claim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value
             ?? User.FindFirst("sub")?.Value
             ?? throw new UnauthorizedAccessException("Dealer ID claim missing.");
-        return int.Parse(claim);
+        if (!int.TryParse(claim, out var dealerId))
+            throw new UnauthorizedAccessException("Dealer ID claim is not a valid integer.");
+        return dealerId;
     }
 
     private static bool IsYearInRange(int year)

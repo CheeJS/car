@@ -33,7 +33,7 @@ Required SDK: **.NET 8.0** (`dotnet --list-sdks` should include an `8.0.*` entry
 dotnet test
 ```
 
-46 tests across two layers:
+46 tests across five suites (four unit + one integration):
 
 | Suite | Focus |
 |---|---|
@@ -95,15 +95,31 @@ curl -X POST http://localhost:5266/api/cars \
 
 ## Architecture
 
+![System architecture](docs/architecture.png)
+
+A request enters at the **Client** (Swagger UI, curl, or `requests.http`) and travels left-to-right through the middleware pipeline, then down through the layered components into SQLite. Solid arrows trace the request path; dashed arrows trace the response.
+
+**Middleware pipeline (in execution order):**
+1. **GlobalExceptionHandler** — outermost wrapper; catches any unhandled exception, logs it server-side with a correlation ID, returns a sanitised 500 envelope (no stack trace).
+2. **Rate Limiter** — fixed-window 30 req/min/IP, scoped to `/api/auth/*` only. Deliberately placed *before* JWT validation so brute-force attempts on the login endpoint are throttled even when no token is presented.
+3. **JWT Bearer** — validates signature, issuer, audience, lifetime, and signing key. `/api/auth/register` and `/api/auth/login` bypass this since they issue the token; everything else under `/api/cars/*` and `/api/auth/me` requires a valid bearer token.
+4. **Authorization** — applies `[Authorize]` attributes against the populated `ClaimsPrincipal`.
+
+**Layer boundaries (what crosses each line):**
+- **Controllers → Services** — the controller extracts `DealerId` from the `NameIdentifier` claim and passes it as a primitive parameter alongside other primitives (`make`, `model`, `year`, etc.). DTOs never escape the controller.
+- **Services → Repositories** — services hand the repository plain primitives. BCrypt verification, whitespace trimming, and any other domain logic happen above this line; the repository receives values that are ready for parameter binding.
+- **Repositories → SQLite** — every query is parameterized Dapper SQL with `WHERE DealerId = @DealerId` on every car-table read, update, and delete. This is where multi-tenant isolation is enforced — at the SQL boundary, not in application code.
+
 ```
 src/OracleCMS.CarStock.API/
 ├── Controllers/        HTTP only: routing, status codes, DTO mapping
-├── Services/           Business logic (and the implementation surface the tests exercise)
+├── Services/           Business logic (the implementation surface the tests exercise)
 ├── Repositories/       Dapper raw SQL — parameterized only
 ├── Entities/           Domain types (Dealer, Car)
 ├── DTOs/               Auth and Cars request/response shapes
-├── Data/               DatabaseInitializer + SqliteConnectionFactory
+├── Data/               DatabaseInitializer, SqliteConnectionFactory, SqliteHealthCheck
 ├── Middleware/         GlobalExceptionMiddleware
+├── Validation/         PasswordComplexityAttribute (custom DataAnnotation)
 └── Program.cs          Composition root: DI, JWT, Swagger, middleware order
 ```
 
@@ -200,10 +216,12 @@ CREATE INDEX IX_Cars_DealerId_Make_Model ON Cars(DealerId, Make, Model);
 ```
 OracleCMS.CarStock.slnx
 ├── src/OracleCMS.CarStock.API/        ASP.NET Core 8 web API
-└── tests/OracleCMS.CarStock.Tests/    xUnit, in-memory SQLite
-README.md
-requests.http
-.gitignore
+├── tests/OracleCMS.CarStock.Tests/    xUnit, in-memory SQLite
+├── .github/workflows/ci.yml           CI: build + test on Ubuntu
+├── docs/architecture.png              System architecture diagram
+├── README.md
+├── requests.http
+└── .gitignore
 ```
 
 ---

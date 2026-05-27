@@ -167,7 +167,7 @@ public sealed class CarServiceTests
         var results = await cars.SearchAsync(dealerA, null, "a");
 
         Assert.Equal(2, results.Count);
-        Assert.All(results, c => Assert.Equal("Audi", c.Make));
+        Assert.All(results, c => Assert.StartsWith("A", c.Model, StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
