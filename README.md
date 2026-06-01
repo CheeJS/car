@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/CheeJS/car/actions/workflows/ci.yml/badge.svg)](https://github.com/CheeJS/car/actions/workflows/ci.yml)
 
-A multi-tenant REST API for dealers to manage car stock. Built with ASP.NET Core 8, Dapper, and SQLite.
+A multi-tenant REST API for dealers to manage car stock. Built with ASP.NET Core 8, [FastEndpoints](https://fast-endpoints.com/), Dapper, and SQLite.
 
 ---
 
@@ -119,36 +119,41 @@ A request enters at the **Client** (Swagger UI, curl, or `requests.http`) and tr
 4. **Authorization** — applies `[Authorize]` attributes against the populated `ClaimsPrincipal`.
 
 **Layer boundaries (what crosses each line):**
-- **Controllers → Services** — the controller extracts `DealerId` from the `NameIdentifier` claim and passes it as a primitive parameter alongside other primitives (`make`, `model`, `year`, etc.). DTOs never escape the controller.
+- **Endpoints → Services** — each endpoint extracts `DealerId` from the `NameIdentifier` claim and passes it as a primitive parameter alongside other primitives (`make`, `model`, `year`, etc.). DTOs never escape the endpoint layer.
 - **Services → Repositories** — services hand the repository plain primitives. BCrypt verification, whitespace trimming, and any other domain logic happen above this line; the repository receives values that are ready for parameter binding.
 - **Repositories → SQLite** — every query is parameterized Dapper SQL with `WHERE DealerId = @DealerId` on every car-table read, update, and delete. This is where multi-tenant isolation is enforced — at the SQL boundary, not in application code.
 
+**Why FastEndpoints?** The API is built with [FastEndpoints](https://fast-endpoints.com/) — a REPR (Request–Endpoint–Response) framework over ASP.NET Core Minimal APIs. Each endpoint is a self-contained class with its own request DTO, FluentValidation validator, and handler, organized under `Features/{Feature}/{Action}/`. This keeps a single endpoint's wiring (route + auth + validation + handler) discoverable in one folder rather than scattered across `[Attribute]`s on a fat controller, and the FluentValidation rules sit beside the handler that consumes them.
+
 ```
 src/OracleCMS.CarStock.API/
-├── Controllers/        HTTP only: routing, status codes, DTO mapping
+├── Features/                        FastEndpoints — one folder per endpoint
+│   ├── Auth/{Register,Login,Me}/    Endpoint.cs + (optional) Validator.cs
+│   └── Cars/{List,Add,GetById,
+│             Delete,UpdateStock,
+│             AdjustStock}/          Endpoint.cs + (optional) Validator.cs
 ├── Services/           Business logic (the implementation surface the tests exercise)
 ├── Repositories/       Dapper raw SQL — parameterized only
 ├── Entities/           Domain types (Dealer, Car)
 ├── DTOs/               Auth and Cars request/response shapes
 ├── Data/               DatabaseInitializer, SqliteConnectionFactory, SqliteHealthCheck
 ├── Middleware/         GlobalExceptionMiddleware
-├── Validation/         PasswordComplexityAttribute (custom DataAnnotation)
 └── Program.cs          Composition root: DI, JWT, Swagger, middleware order
 ```
 
-Strict layered separation: controllers never talk to repositories directly, repositories never contain business rules, services never serialize JSON.
+Strict layered separation: endpoints never talk to repositories directly, repositories never contain business rules, services never serialize JSON.
 
 ### Multi-tenancy
 
 - **Dealer ID is always pulled from the JWT's `NameIdentifier` claim.** It is never read from request bodies or query strings — there is no path by which a dealer can act on another dealer's data.
-- Every car-table query is parameterized with `DealerId`. `UPDATE` and `DELETE` use `WHERE Id = @Id AND DealerId = @DealerId`; if zero rows are affected, the controller returns **404**, not 403, so resource existence is never leaked.
+- Every car-table query is parameterized with `DealerId`. `UPDATE` and `DELETE` use `WHERE Id = @Id AND DealerId = @DealerId`; if zero rows are affected, the endpoint returns **404**, not 403, so resource existence is never leaked.
 - `CarResponse` deliberately omits `DealerId` — it's implicit from the caller's own token.
 
 ### Security
 
 | Concern | Implementation |
 |---|---|
-| Passwords | BCrypt with work factor 12 (`BCrypt.Net-Next`). Stored hashes verified to start with `$2…` by an automated test. Registration enforces complexity via a custom `[PasswordComplexity]` attribute: uppercase, lowercase, digit, and special character all required. |
+| Passwords | BCrypt with work factor 12 (`BCrypt.Net-Next`). Stored hashes verified to start with `$2…` by an automated test. Registration enforces complexity via a FluentValidation rule on `RegisterRequest`: uppercase, lowercase, digit, and special character all required. |
 | SQL injection | All queries use Dapper's `@Name` parameters bound via anonymous objects. No string interpolation, no concatenation. Tests cover the search path. |
 | JWT signing | HMAC-SHA256 with a secret loaded from configuration; startup refuses to boot if the secret is the documented placeholder or shorter than 32 bytes. |
 | Unhandled errors | `GlobalExceptionMiddleware` logs the full exception server-side with a correlation ID; the client receives only `{ "error": "An unexpected error occurred.", "correlationId": "…" }`. No stack traces, no exception types in responses. |
@@ -246,8 +251,8 @@ OracleCMS.CarStock.slnx
 - **`COLLATE NOCASE` on the `Dealers.Email` column + unique index** — case-insensitive uniqueness enforced by the DB, not just by the service.
 - **`public partial class Program;`** — top-level statement programs generate an implicit, inaccessible `Program` class; the `partial` declaration makes it visible across assembly boundaries so `WebApplicationFactory<Program>` in the integration test suite can boot a real in-process server against the same composition root the production API uses.
 - **JWT placeholder guard** — `Program.cs` refuses to start if the secret is still the documented placeholder. Better to fail loud than ship a misconfigured prod.
-- **Dynamic year validation** — `[Range(1886, 9999)]` plus a runtime check against `DateTime.UtcNow.Year + 1` (data annotations can't reference runtime values).
-- **`GetById` is exposed in addition to the spec's four required car operations** — needed to back `CreatedAtAction`'s `Location` header on POST. Useful for clients that want to refetch a single car by ID.
+- **Dynamic year validation** — the FluentValidation rule caps `Year` at 9999; a runtime check in the `Add` endpoint tightens it to `DateTime.UtcNow.Year + 1` (so the bound moves automatically each new year).
+- **`GetById` is exposed in addition to the spec's four required car operations** — needed to back the `Location` header on `POST /api/cars` (FastEndpoints' `Send.CreatedAtAsync<GetCarByIdEndpoint>`). Useful for clients that want to refetch a single car by ID.
 - **Two stock-mutation endpoints** — `PATCH /stock` overwrites, `PATCH /stock/adjust` applies a delta. The adjust variant is the one to reach for in real client code: it's atomic, concurrent-safe, and refuses to take stock negative. The set-variant is kept for ergonomics (single PATCH to fix bookkeeping).
 - **Rate-limited auth endpoints** — 30 requests/minute/IP via .NET 8's built-in `RateLimiter`. Tight enough to deter brute force; loose enough not to interfere with normal usage or integration tests.
 - **`GET /api/auth/me`** — convenience endpoint for clients that need to display the logged-in dealer without round-tripping the email on each request. Doubles as a quick token-validity probe.

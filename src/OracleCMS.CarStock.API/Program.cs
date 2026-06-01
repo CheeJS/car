@@ -1,14 +1,12 @@
-using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using System.Threading.RateLimiting;
+using FastEndpoints;
+using FastEndpoints.Swagger;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
-using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.IdentityModel.Tokens;
-using Microsoft.OpenApi.Models;
 using OracleCMS.CarStock.API.Data;
 using OracleCMS.CarStock.API.Middleware;
 using OracleCMS.CarStock.API.Repositories;
@@ -51,25 +49,17 @@ builder.Services.AddScoped<ICarRepository, CarRepository>();
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<ICarService, CarService>();
 
-builder.Services.AddControllers()
-    .ConfigureApiBehaviorOptions(options =>
+builder.Services.AddFastEndpoints();
+builder.Services.SwaggerDocument(o =>
+{
+    o.EnableJWTBearerAuth = true;
+    o.DocumentSettings = s =>
     {
-        options.InvalidModelStateResponseFactory = context =>
-        {
-            var detail = string.Join(" ", context.ModelState
-                .Where(kvp => kvp.Value is not null && kvp.Value.Errors.Count > 0)
-                .SelectMany(kvp => kvp.Value!.Errors.Select(e =>
-                    string.IsNullOrWhiteSpace(e.ErrorMessage)
-                        ? $"{kvp.Key} is invalid."
-                        : e.ErrorMessage)));
-
-            return new BadRequestObjectResult(new
-            {
-                error = "Validation failed",
-                detail = string.IsNullOrWhiteSpace(detail) ? "One or more fields are invalid." : detail
-            });
-        };
-    });
+        s.Title = "OracleCMS Car Stock API";
+        s.Version = "v1";
+        s.Description = "Multi-tenant car stock management API for dealers.";
+    };
+});
 
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -121,44 +111,6 @@ builder.Services.AddRateLimiter(options =>
 builder.Services.AddHealthChecks()
     .AddCheck<SqliteHealthCheck>("sqlite", tags: new[] { "ready" });
 
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen(c =>
-{
-    c.SwaggerDoc("v1", new OpenApiInfo
-    {
-        Title = "OracleCMS Car Stock API",
-        Version = "v1",
-        Description = "Multi-tenant car stock management API for dealers."
-    });
-
-    var xmlPath = Path.Combine(AppContext.BaseDirectory,
-        $"{Assembly.GetExecutingAssembly().GetName().Name}.xml");
-    if (File.Exists(xmlPath))
-    {
-        c.IncludeXmlComments(xmlPath, includeControllerXmlComments: true);
-    }
-
-    var bearerScheme = new OpenApiSecurityScheme
-    {
-        Name = "Authorization",
-        Description = "Paste your JWT here (without the 'Bearer ' prefix).",
-        In = ParameterLocation.Header,
-        Type = SecuritySchemeType.Http,
-        Scheme = "bearer",
-        BearerFormat = "JWT",
-        Reference = new OpenApiReference
-        {
-            Id = JwtBearerDefaults.AuthenticationScheme,
-            Type = ReferenceType.SecurityScheme
-        }
-    };
-    c.AddSecurityDefinition(bearerScheme.Reference.Id, bearerScheme);
-    c.AddSecurityRequirement(new OpenApiSecurityRequirement
-    {
-        [bearerScheme] = Array.Empty<string>()
-    });
-});
-
 var app = builder.Build();
 
 var connectionString = app.Configuration.GetConnectionString("DefaultConnection")
@@ -167,12 +119,6 @@ DatabaseInitializer.Initialize(connectionString);
 
 app.UseMiddleware<GlobalExceptionMiddleware>();
 
-if (app.Environment.IsDevelopment())
-{
-    app.UseSwagger();
-    app.UseSwaggerUI();
-}
-
 app.UseHttpsRedirection();
 
 app.UseRateLimiter();
@@ -180,7 +126,29 @@ app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 
-app.MapControllers();
+// Preserve the existing { error, detail } error envelope so integration tests
+// and clients aren't broken by switching to FastEndpoints' default response shape.
+app.UseFastEndpoints(c =>
+{
+    c.Errors.ResponseBuilder = (failures, _, _) =>
+    {
+        var detail = string.Join(" ", failures
+            .Select(f => string.IsNullOrWhiteSpace(f.ErrorMessage)
+                ? $"{f.PropertyName} is invalid."
+                : f.ErrorMessage));
+
+        return new
+        {
+            error = "Validation failed",
+            detail = string.IsNullOrWhiteSpace(detail) ? "One or more fields are invalid." : detail
+        };
+    };
+});
+
+if (app.Environment.IsDevelopment())
+{
+    app.UseSwaggerGen();
+}
 
 app.MapHealthChecks("/health", new HealthCheckOptions
 {
