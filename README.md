@@ -136,9 +136,11 @@ A request enters at the **Client** (Swagger UI, curl, or `requests.http`) and tr
 
 **Middleware pipeline (in execution order):**
 1. **GlobalExceptionHandler** — outermost wrapper; catches any unhandled exception, logs it server-side with a correlation ID, returns a sanitised 500 envelope (no stack trace).
-2. **Rate Limiter** — fixed-window 30 req/min/IP, scoped to `/api/auth/*` only. Deliberately placed *before* JWT validation so brute-force attempts on the login endpoint are throttled even when no token is presented.
-3. **JWT Bearer** — validates signature, issuer, audience, lifetime, and signing key. `/api/auth/register` and `/api/auth/login` bypass this since they issue the token; everything else under `/api/cars/*` and `/api/auth/me` requires a valid bearer token.
-4. **Authorization** — applies `[Authorize]` attributes against the populated `ClaimsPrincipal`.
+2. **HttpsRedirection** — upgrades `http://` requests to `https://` before any work happens downstream.
+3. **Rate Limiter** — fixed-window 30 req/min/IP, scoped to `/api/auth/*` only. Deliberately placed *before* JWT validation so brute-force attempts on the login endpoint are throttled even when no token is presented.
+4. **Authentication (JWT Bearer)** — validates signature, issuer, audience, lifetime, and signing key *if* a token is presented. Tokens are not required at this stage; whether one is required is decided next.
+5. **Authorization** — every endpoint requires a valid `ClaimsPrincipal` by default; `Register` and `Login` opt out with `AllowAnonymous()` in their `Configure()` method. This is the stage that actually rejects anonymous calls to protected endpoints with 401.
+6. **UseFastEndpoints (dispatcher)** — terminal stage that matches the incoming route + verb to the right endpoint class, invokes its validator, then its handler. Not a cross-cutting concern; it's the bridge from pipeline → endpoint code.
 
 **Layer boundaries (what crosses each line):**
 - **Endpoints → Services** — each endpoint extracts `DealerId` from the `NameIdentifier` claim and passes it as a primitive parameter alongside other primitives (`make`, `model`, `year`, etc.). DTOs never escape the endpoint layer.
