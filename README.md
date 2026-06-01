@@ -6,24 +6,46 @@ A multi-tenant REST API for dealers to manage car stock. Built with ASP.NET Core
 
 ---
 
-## Quick start
+## TL;DR — run and test
+
+Requires **.NET 8.0 SDK** (`dotnet --list-sdks` should list an `8.0.*` entry).
 
 ```bash
-# 1. Restore + build
-dotnet build
+# 1. Run the test suite (46 tests, ~6s)
+dotnet test
 
-# 2. Run the API (the SQLite file is created automatically on first launch)
+# 2. Run the API
 dotnet run --project src/OracleCMS.CarStock.API
 ```
 
-The API listens on **http://localhost:5266** by default and the browser opens Swagger UI automatically.
+Then open Swagger at **http://localhost:5266/swagger**, click **Authorize**, and exercise the API interactively. The repo ships with a **pre-populated** `carstock.db` — log in immediately as:
 
-| URL | Purpose |
+| Email | Password |
 |---|---|
-| `http://localhost:5266` | API base |
-| `http://localhost:5266/swagger` | Swagger UI (with a JWT bearer authorize button) |
+| `alice@dealership.com` | `AlicePass1!` |
+| `bob@dealership.com`   | `BobPass1!`  |
 
-Required SDK: **.NET 8.0** (`dotnet --list-sdks` should include an `8.0.*` entry).
+(Full inventory and reset instructions in [Pre-populated sample database](#pre-populated-sample-database) below.)
+
+---
+
+## What's new — FastEndpoints migration
+
+The HTTP layer was migrated from classic MVC controllers to **[FastEndpoints](https://fast-endpoints.com/)** (REPR — Request–Endpoint–Response — pattern over Minimal APIs). What this means in practice:
+
+| Before (MVC controllers) | After (FastEndpoints) |
+|---|---|
+| `Controllers/AuthController.cs` (3 actions) | `Features/Auth/{Register,Login,Me}/Endpoint.cs` (3 files) |
+| `Controllers/CarsController.cs` (6 actions) | `Features/Cars/{List,Add,GetById,Delete,UpdateStock,AdjustStock}/Endpoint.cs` (6 files) |
+| `[Authorize]` / `[AllowAnonymous]` attributes per action | `Configure()` calls `AllowAnonymous()` explicitly; auth required by default |
+| `[Route]`, `[HttpGet]`, `[HttpPost]` attributes | `Get("/api/cars")`, `Post(...)`, `Patch(...)` inside `Configure()` |
+| `[Required]`, `[Range]`, custom `[PasswordComplexity]` on DTOs | FluentValidation `Validator<TRequest>` co-located with each endpoint |
+| `Swashbuckle.AspNetCore` for Swagger | `FastEndpoints.Swagger` (NSwag-based) with `EnableJWTBearerAuth = true` |
+| `return Ok(...)` / `CreatedAtAction(...)` | `Send.OkAsync(...)` / `Send.CreatedAtAsync<TEndpoint>(...)` |
+
+**What did not change:** routes, status codes, response shapes, the existing `{ error, detail }` error envelope (preserved via FastEndpoints' `c.Errors.ResponseBuilder`), services, repositories, entities, JWT setup, rate limiter, the 46-test integration suite, `requests.http`, the pre-populated database. The migration is *contract-preserving* — every existing client and test still works without modification.
+
+**Why this layout?** Each endpoint's wiring — route + auth + validation + handler — lives in one folder. The FluentValidation rules sit next to the handler that consumes them rather than scattered as attributes on the DTO. Adding a new endpoint is "create a new folder under `Features/`," not "edit a fat controller and remember to register a new validator somewhere else."
 
 ---
 
@@ -233,10 +255,23 @@ CREATE INDEX IX_Cars_DealerId_Make_Model ON Cars(DealerId, Make, Model);
 
 ```
 OracleCMS.CarStock.slnx
-├── src/OracleCMS.CarStock.API/        ASP.NET Core 8 web API
-├── tests/OracleCMS.CarStock.Tests/    xUnit, in-memory SQLite
-├── .github/workflows/ci.yml           CI: build + test on Ubuntu
-├── docs/architecture.png              System architecture diagram
+├── src/OracleCMS.CarStock.API/
+│   ├── Features/                         FastEndpoints — one folder per endpoint
+│   │   ├── Auth/{Register,Login,Me}/         Endpoint.cs + (optional) Validator.cs
+│   │   └── Cars/{List,Add,GetById,
+│   │             Delete,UpdateStock,
+│   │             AdjustStock}/               Endpoint.cs + (optional) Validator.cs
+│   ├── Services/                         Business logic (BCrypt, JWT, trimming, outcome mapping)
+│   ├── Repositories/                     Dapper raw SQL — parameterized only
+│   ├── Entities/                         Domain types (Dealer, Car)
+│   ├── DTOs/                             Auth and Cars request/response shapes
+│   ├── Data/                             DatabaseInitializer, SqliteConnectionFactory, SqliteHealthCheck
+│   ├── Middleware/                       GlobalExceptionMiddleware
+│   ├── Data/carstock.db                  Pre-populated sample database (committed)
+│   └── Program.cs                        Composition root: DI, JWT, Swagger, middleware order
+├── tests/OracleCMS.CarStock.Tests/       xUnit, in-memory SQLite
+├── .github/workflows/ci.yml              CI: build + test on Ubuntu
+├── docs/architecture.png                 System architecture diagram
 ├── README.md
 ├── requests.http
 └── .gitignore
@@ -272,5 +307,5 @@ OracleCMS.CarStock.slnx
 | 5 | **OpenTelemetry traces** | When a request is slow it's currently opaque — is it BCrypt, the DB query, or middleware? Adding trace context propagation (via `System.Diagnostics.Activity` + an OTLP exporter) lets a single slow request be broken down into labelled spans without manually timing each layer. |
 | 6 | **Role-based permissions** | Any authenticated dealer can mutate their own stock. A real system distinguishes a "stock manager" role (read + write) from a "viewer" role (read-only). This maps cleanly to JWT claims + ASP.NET Core policy-based authorization and requires no schema changes — just an extra claim at registration and `[Authorize(Policy = "StockManager")]` on mutating endpoints. |
 | 7 | **Docker + Compose file** | A `docker compose up` that starts the API with an injected `Jwt__Secret` environment variable and mounts a volume for the SQLite file removes the "install .NET 8 SDK" prerequisite for evaluators and mirrors a minimal production deployment. |
-| 8 | **Password hardening beyond complexity rules** | `RegisterRequest` already enforces complexity via `[PasswordComplexity]` (uppercase, digit, special character required). The next step is a HIBP (Have I Been Pwned) breach-check at registration: hash the password with SHA-1, send the first 5 hex characters to the k-anonymity API, and reject passwords that appear in known breach sets — without ever sending the full password to a third party. |
+| 8 | **Password hardening beyond complexity rules** | `RegisterRequest` already enforces complexity via a FluentValidation rule (uppercase, lowercase, digit, special character required). The next step is a HIBP (Have I Been Pwned) breach-check at registration: hash the password with SHA-1, send the first 5 hex characters to the k-anonymity API, and reject passwords that appear in known breach sets — without ever sending the full password to a third party. |
 
