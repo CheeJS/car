@@ -29,23 +29,28 @@ Then open Swagger at **http://localhost:5266/swagger**, click **Authorize**, and
 
 ---
 
-## What's new — FastEndpoints migration
+## How the API is structured
 
-The HTTP layer was migrated from classic MVC controllers to **[FastEndpoints](https://fast-endpoints.com/)** (REPR — Request–Endpoint–Response — pattern over Minimal APIs). What this means in practice:
+The HTTP layer is built with **[FastEndpoints](https://fast-endpoints.com/)** — a REPR (Request–Endpoint–Response) framework over ASP.NET Core Minimal APIs. Each endpoint is its own class under `Features/{Feature}/{Action}/`:
 
-| Before (MVC controllers) | After (FastEndpoints) |
-|---|---|
-| `Controllers/AuthController.cs` (3 actions) | `Features/Auth/{Register,Login,Me}/Endpoint.cs` (3 files) |
-| `Controllers/CarsController.cs` (6 actions) | `Features/Cars/{List,Add,GetById,Delete,UpdateStock,AdjustStock}/Endpoint.cs` (6 files) |
-| `[Authorize]` / `[AllowAnonymous]` attributes per action | `Configure()` calls `AllowAnonymous()` explicitly; auth required by default |
-| `[Route]`, `[HttpGet]`, `[HttpPost]` attributes | `Get("/api/cars")`, `Post(...)`, `Patch(...)` inside `Configure()` |
-| `[Required]`, `[Range]`, custom `[PasswordComplexity]` on DTOs | FluentValidation `Validator<TRequest>` co-located with each endpoint |
-| `Swashbuckle.AspNetCore` for Swagger | `FastEndpoints.Swagger` (NSwag-based) with `EnableJWTBearerAuth = true` |
-| `return Ok(...)` / `CreatedAtAction(...)` | `Send.OkAsync(...)` / `Send.CreatedAtAsync<TEndpoint>(...)` |
+```
+src/OracleCMS.CarStock.API/Features/
+├── Auth/
+│   ├── Register/   Endpoint.cs + Validator.cs
+│   ├── Login/      Endpoint.cs + Validator.cs
+│   └── Me/         Endpoint.cs
+└── Cars/
+    ├── List/        Endpoint.cs
+    ├── Add/         Endpoint.cs + Validator.cs
+    ├── GetById/     Endpoint.cs
+    ├── Delete/      Endpoint.cs
+    ├── UpdateStock/ Endpoint.cs + Validator.cs
+    └── AdjustStock/ Endpoint.cs + Validator.cs
+```
 
-**What did not change:** routes, status codes, response shapes, the existing `{ error, detail }` error envelope (preserved via FastEndpoints' `c.Errors.ResponseBuilder`), services, repositories, entities, JWT setup, rate limiter, the 46-test integration suite, `requests.http`, the pre-populated database. The migration is *contract-preserving* — every existing client and test still works without modification.
+Each `Endpoint.cs` declares its route, HTTP verb, auth requirement, and handler in a single `Configure()` + `HandleAsync()` pair. Validation lives next to the handler as a FluentValidation `Validator<TRequest>` rather than as attributes on the DTO — so adding an endpoint is *"create a folder under `Features/`"*, with nothing else to wire up.
 
-**Why this layout?** Each endpoint's wiring — route + auth + validation + handler — lives in one folder. The FluentValidation rules sit next to the handler that consumes them rather than scattered as attributes on the DTO. Adding a new endpoint is "create a new folder under `Features/`," not "edit a fat controller and remember to register a new validator somewhere else."
+Below the endpoint layer the architecture is standard layered .NET: Services → Repositories (Dapper raw SQL) → SQLite. See [Architecture](#architecture) for the full picture.
 
 ---
 
@@ -147,7 +152,7 @@ A request enters at the **Client** (Swagger UI, curl, or `requests.http`) and tr
 - **Services → Repositories** — services hand the repository plain primitives. BCrypt verification, whitespace trimming, and any other domain logic happen above this line; the repository receives values that are ready for parameter binding.
 - **Repositories → SQLite** — every query is parameterized Dapper SQL with `WHERE DealerId = @DealerId` on every car-table read, update, and delete. This is where multi-tenant isolation is enforced — at the SQL boundary, not in application code.
 
-**Why FastEndpoints?** The API is built with [FastEndpoints](https://fast-endpoints.com/) — a REPR (Request–Endpoint–Response) framework over ASP.NET Core Minimal APIs. Each endpoint is a self-contained class with its own request DTO, FluentValidation validator, and handler, organized under `Features/{Feature}/{Action}/`. This keeps a single endpoint's wiring (route + auth + validation + handler) discoverable in one folder rather than scattered across `[Attribute]`s on a fat controller, and the FluentValidation rules sit beside the handler that consumes them.
+**FastEndpoints layer.** The API is built with [FastEndpoints](https://fast-endpoints.com/) — a REPR (Request–Endpoint–Response) framework over ASP.NET Core Minimal APIs. Each endpoint is a self-contained class with its own request DTO, FluentValidation validator, and handler, organized under `Features/{Feature}/{Action}/`. A single endpoint's wiring — route, auth, validation, and handler — is discoverable in one folder, with the FluentValidation rules sitting beside the handler that consumes them.
 
 ```
 src/OracleCMS.CarStock.API/
